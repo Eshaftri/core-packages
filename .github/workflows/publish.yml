@@ -1,7 +1,6 @@
-# Name of the GitHub Action workflow
+
 name: build-and-publish
 
-# Trigger this workflow on push to `main` and changes to packages or this workflow file
 on:
   push:
     branches: [main]
@@ -11,59 +10,46 @@ on:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest  # Use the latest Ubuntu runner
+    runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Clone the repository onto the GitHub Actions runner
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Step 2: Setup Node.js v20 on the runner
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # Step 3: Write a temporary .npmrc file with your GitHub npm token for authentication
       - name: Write .npmrc
         run: echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" > .npmrc
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # Step 4: Install all dependencies using npm workspaces
       - name: Install dependencies
         run: npm ci --workspaces
 
-      # Step 5: Build all packages that support the `build` script
       - name: Build packages
         run: npm run build --workspaces
 
-      # Step 6: Optional debug to check if npm is authenticated correctly
       - name: Debug auth
         run: npm whoami || echo "Not authenticated"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_USERCONFIG: ${{ github.workspace }}/.npmrc
 
-      # Step 7: Publish changed workspaces (i.e., those with new versions not yet published)
       - name: Publish changed workspaces
-        id: publish  # Add an ID so we can reference its outputs later
+        id: publish
         run: |
-          set -e  # Exit if any command fails
-          CHANGED=0  # Track if any package was published
-
-          # Find all workspaces (folders in /packages that have package.json)
+          set -e
+          CHANGED=0
           WORKSPACES=$(find packages -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/package.json' \; -print | sed 's|packages/||')
-
           for WS in $WORKSPACES; do
             PKG_PATH="packages/$WS"
-            PKG_NAME=$(jq -r .name "$PKG_PATH/package.json")      # Read package name
-            VERSION=$(jq -r .version "$PKG_PATH/package.json")    # Read version
-
+            PKG_NAME=$(jq -r .name "$PKG_PATH/package.json")
+            VERSION=$(jq -r .version "$PKG_PATH/package.json")
             echo "Checking $PKG_NAME@$VERSION..."
-            # Check if this version already exists in the registry
             TAG_EXISTS=$(npm view "$PKG_NAME@$VERSION" version 2>/dev/null || echo "")
-
             if [ -z "$TAG_EXISTS" ]; then
               echo "::group::Publishing $PKG_NAME@$VERSION"
               npm publish --workspace "$PKG_NAME" --access=public --registry=https://npm.pkg.github.com
@@ -73,25 +59,21 @@ jobs:
               echo "Skipping $PKG_NAME@$VERSION (already published)"
             fi
           done
-
-          # Set output to signal whether any package was actually published
           echo "changed=$CHANGED" >> $GITHUB_OUTPUT
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_USERCONFIG: ${{ github.workspace }}/.npmrc
 
-      # Step 8: Configure git to use the GH token so we can push tags
       - name: Set up Git credentials
-        if: steps.publish.outputs.changed == '1'  # Only run if we published anything
+        if: steps.publish.outputs.changed == '1'
         run: git remote set-url origin https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/${{ github.repository }}
 
-      # Step 9: Create and push a git tag with timestamp if changes were published
       - name: Create Git Tag
-        if: steps.publish.outputs.changed == '1'  # Only tag if changes were published
+        if: steps.publish.outputs.changed == '1'
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
-          TAG_NAME="packages-$(date +'%Y%m%d%H%M%S')"  # Create a tag with a unique timestamp
+          TAG_NAME="packages-$(date +'%Y%m%d%H%M%S')"
           git tag "$TAG_NAME"
           git push origin "$TAG_NAME"
         env:
