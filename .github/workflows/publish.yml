@@ -1,60 +1,47 @@
-name: Build & Publish Packages
+name: build-and-publish
 
 on:
   push:
-    branches: [main]
-    paths:
-      - "packages/**/package.json"
-      - ".github/workflows/publish.yml"
-  workflow_dispatch: {}
+    branches:
+      - main
 
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    env:
-      NPM_CONFIG_USERCONFIG: ${{ github.workspace }}/.npmrc
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
-          registry-url: "https://npm.pkg.github.com"
-          scope: "@eshaftri"
+          node-version: 20
 
-      # Write a project‑scoped .npmrc that contains the PAT
       - name: Write .npmrc
-        run: echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" > $NPM_CONFIG_USERCONFIG
+        run: |
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
 
-      - run: npm install
-      - run: npm run build --workspaces
+      - name: Install dependencies
+        run: npm install
 
-      # Confirm the token really works
+      - name: Build packages
+        run: npm run build --workspaces
+
       - name: Debug auth
         run: npm whoami --registry=https://npm.pkg.github.com
 
       - name: Publish changed workspaces
-        id: publish
         run: |
           set -e
           CHANGED=0
           WORKSPACES=$(find packages -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/package.json' \; -print | sed 's|packages/||')
-
           for WS in $WORKSPACES; do
             PKG_PATH="packages/$WS"
             PKG_NAME=$(jq -r .name "$PKG_PATH/package.json")
             VERSION=$(jq -r .version "$PKG_PATH/package.json")
-
             echo "Checking $PKG_NAME@$VERSION..."
             TAG_EXISTS=$(npm view "$PKG_NAME@$VERSION" version 2>/dev/null || echo "")
-
             if [ -z "$TAG_EXISTS" ]; then
               echo "::group::Publishing $PKG_NAME@$VERSION"
               npm publish --workspace "$PKG_NAME" --access=restricted --registry=https://npm.pkg.github.com
@@ -64,13 +51,18 @@ jobs:
               echo "Skipping $PKG_NAME@$VERSION (already published)"
             fi
           done
-
           echo "changed=$CHANGED" >> $GITHUB_OUTPUT
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_USERCONFIG: ~/.npmrc
+
+      - name: Set up Git credentials for pushing
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
 
       - name: Tag commit
-        if: steps.publish.outputs.changed == '1'
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
           git tag "packages-$(date +'%Y%m%d%H%M%S')"
           git push --tags
