@@ -37,12 +37,12 @@ jobs:
           set -e
 
           CHANGED=0
-          WORKSPACES=$(jq -r '.workspaces[]' package.json | sed 's/packages\///;s/\/*$//')
+          WORKSPACES=$(find packages -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/package.json' \; -print | sed 's|packages/||')
 
           for WS in $WORKSPACES; do
             PKG_PATH="packages/$WS"
-            PKG_NAME=$(jq -r .name $PKG_PATH/package.json)
-            VERSION=$(jq -r .version $PKG_PATH/package.json)
+            PKG_NAME=$(jq -r .name "$PKG_PATH/package.json")
+            VERSION=$(jq -r .version "$PKG_PATH/package.json")
 
             echo "Checking $PKG_NAME@$VERSION..."
             TAG_EXISTS=$(npm view "$PKG_NAME@$VERSION" version 2>/dev/null || echo "")
