@@ -2,13 +2,11 @@ name: build-and-publish
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
-  build-and-publish:
+  publish:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -17,10 +15,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          registry-url: https://npm.pkg.github.com/
+          scope: '@eshaftri'
 
       - name: Write .npmrc
         run: |
-          echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Install dependencies
         run: npm install
@@ -29,19 +31,25 @@ jobs:
         run: npm run build --workspaces
 
       - name: Debug auth
-        run: npm whoami --registry=https://npm.pkg.github.com
+        run: |
+          echo "NPM_TOKEN is set: ${NPM_TOKEN:0:4}****"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish changed workspaces
         run: |
           set -e
           CHANGED=0
           WORKSPACES=$(find packages -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/package.json' \; -print | sed 's|packages/||')
+
           for WS in $WORKSPACES; do
             PKG_PATH="packages/$WS"
             PKG_NAME=$(jq -r .name "$PKG_PATH/package.json")
             VERSION=$(jq -r .version "$PKG_PATH/package.json")
+
             echo "Checking $PKG_NAME@$VERSION..."
             TAG_EXISTS=$(npm view "$PKG_NAME@$VERSION" version 2>/dev/null || echo "")
+
             if [ -z "$TAG_EXISTS" ]; then
               echo "::group::Publishing $PKG_NAME@$VERSION"
               npm publish --workspace "$PKG_NAME" --access=restricted --registry=https://npm.pkg.github.com
@@ -51,18 +59,21 @@ jobs:
               echo "Skipping $PKG_NAME@$VERSION (already published)"
             fi
           done
+
           echo "changed=$CHANGED" >> $GITHUB_OUTPUT
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_USERCONFIG: ~/.npmrc
 
       - name: Set up Git credentials for pushing
         run: |
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          git remote set-url origin https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/Eshaftri/core-packages.git
 
       - name: Tag commit
         run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
           git tag "packages-$(date +'%Y%m%d%H%M%S')"
-          git push --tags
+          git push origin --tags
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
