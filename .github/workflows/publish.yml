@@ -2,55 +2,55 @@ name: build-and-publish
 
 on:
   push:
-    branches: [main]  # Trigger on changes to main branch
+    branches: [main] # Trigger the workflow when changes are pushed to the 'main' branch
     paths:
-      - 'packages/**' # Only trigger if package files or publish script changes
-      - '.github/workflows/publish.yml'
+      - 'packages/**' # Only trigger if something changes inside packages/
+      - '.github/workflows/publish.yml' # Or if this workflow file itself changes
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # Use the latest Ubuntu runner
 
     steps:
-      # Step 1: Clone the repository
+      # Step 1: Checkout the repository using GitHub's token
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Step 2: Set up Node.js environment
+      # Step 2: Setup Node.js version 20
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # Step 3: Write a custom .npmrc with GitHub npm token
+      # Step 3: Write .npmrc with GitHub Packages auth
       - name: Write .npmrc
         run: echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" > .npmrc
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # Step 4: Install all dependencies for all workspaces
+      # Step 4: Install dependencies for all workspaces using npm
       - name: Install dependencies
         run: npm ci --workspaces
 
-      # Step 5: Run build step for each workspace
+      # Step 5: Build each workspace (assumes each has a build script)
       - name: Build packages
         run: npm run build --workspaces
 
-      # Step 6: Verify if authenticated with npm
+      # Step 6: Debug authentication (optional, but useful for troubleshooting)
       - name: Debug auth
         run: npm whoami || echo "Not authenticated"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_USERCONFIG: ${{ github.workspace }}/.npmrc
 
-      # Step 7: Publish only changed packages
+      # Step 7: Publish any changed workspaces
       - name: Publish changed workspaces
         id: publish
         run: |
           set -e
           CHANGED=0
           WORKSPACES=$(find packages -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/package.json' \; -print | sed 's|packages/||')
-          
+
           for WS in $WORKSPACES; do
             PKG_PATH="packages/$WS"
             PKG_NAME=$(jq -r .name "$PKG_PATH/package.json")
@@ -74,19 +74,15 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_USERCONFIG: ${{ github.workspace }}/.npmrc
 
-      # Step 8: Create Git tag if anything was published
+      # Step 8: Create Git Tag (only if packages were published)
       - name: Create Git Tag
         if: steps.publish.outputs.changed == '1'
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
-
-          # Generate tag name using timestamp
-          TAG_NAME="packages-$(date +'%Y%m%d%H%M%S')"
+          TAG_NAME="packages-$(date +'%Y%m%d%H%M%S')" # e.g., packages-20250710123000
           git tag "$TAG_NAME"
-
-          # Push tag using personal access token
-          git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}
           git push origin "$TAG_NAME"
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Use GitHub's default token
+
