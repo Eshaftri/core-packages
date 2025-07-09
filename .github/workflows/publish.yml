@@ -1,0 +1,59 @@
+name: Build & Publish Packages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/**/package.json"
+      - ".github/workflows/publish.yml"
+  workflow_dispatch: {}
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@eshaftri"
+
+      - name: Configure npm auth
+        run: echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> $HOME/.npmrc
+
+      - run: npm install
+      - run: npm run build --workspaces
+
+      - name: Publish changed workspaces
+        id: publish
+        run: |
+          set -e
+          CHANGED=0
+          for WS in $(npm query .workspaces[].name); do
+            VERSION=$(node -p "require('./packages/' + WS.split('/')[1] + '/package.json').version")
+            TAG_EXISTS=$(npm view $WS@$VERSION version 2>/dev/null || echo "")
+            if [ -z "$TAG_EXISTS" ]; then
+              echo "::group::Publishing $WS@$VERSION"
+              npm publish --workspace $WS --access=restricted --registry=https://npm.pkg.github.com
+              echo "::endgroup::"
+              CHANGED=1
+            else
+              echo "Skipping $WS@$VERSION (already published)"
+            fi
+          done
+          echo "changed=$CHANGED" >> $GITHUB_OUTPUT
+
+      - name: Tag commit
+        if: steps.publish.outputs.changed == '1'
+        run: |
+          git config user.name  "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git tag "packages-$(date +'%Y%m%d%H%M%S')"
+          git push --tags

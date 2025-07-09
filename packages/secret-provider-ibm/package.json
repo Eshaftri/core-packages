@@ -1,0 +1,24 @@
+{
+  "name": "@eshaftri/secret-provider-ibm",
+  "version": "1.0.0",
+  "description": "Secret provider for IBM Cloud Secrets Manager",
+  "main": "dist/SecretProvider.js",
+  "types": "dist/SecretProvider.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "dependencies": {
+    "@ibm-cloud/secrets-manager": "^2.0.11",
+    "ibm-cloud-sdk-core": "^5.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
