@@ -35,19 +35,28 @@ jobs:
         id: publish
         run: |
           set -e
+
           CHANGED=0
-          for WS in $(npm query .workspaces[].name); do
-            VERSION=$(node -p "require('./packages/' + WS.split('/')[1] + '/package.json').version")
-            TAG_EXISTS=$(npm view $WS@$VERSION version 2>/dev/null || echo "")
+          WORKSPACES=$(jq -r '.workspaces[]' package.json | sed 's/packages\///;s/\/*$//')
+
+          for WS in $WORKSPACES; do
+            PKG_PATH="packages/$WS"
+            PKG_NAME=$(jq -r .name $PKG_PATH/package.json)
+            VERSION=$(jq -r .version $PKG_PATH/package.json)
+
+            echo "Checking $PKG_NAME@$VERSION..."
+            TAG_EXISTS=$(npm view "$PKG_NAME@$VERSION" version 2>/dev/null || echo "")
+
             if [ -z "$TAG_EXISTS" ]; then
-              echo "::group::Publishing $WS@$VERSION"
-              npm publish --workspace $WS --access=restricted --registry=https://npm.pkg.github.com
+              echo "::group::Publishing $PKG_NAME@$VERSION"
+              npm publish --workspace "$PKG_NAME" --access=restricted --registry=https://npm.pkg.github.com
               echo "::endgroup::"
               CHANGED=1
             else
-              echo "Skipping $WS@$VERSION (already published)"
+              echo "Skipping $PKG_NAME@$VERSION (already published)"
             fi
           done
+
           echo "changed=$CHANGED" >> $GITHUB_OUTPUT
 
       - name: Tag commit
