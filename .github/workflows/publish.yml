@@ -26,7 +26,7 @@ jobs:
           scope: "@eshaftri"
 
       - name: Configure npm auth
-        run: echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> $HOME/.npmrc
+        run: echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" >> $HOME/.npmrc
 
       - run: npm install
       - run: npm run build --workspaces
