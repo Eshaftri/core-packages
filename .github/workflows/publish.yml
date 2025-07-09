@@ -1,43 +1,49 @@
-name: Publish
+name: build-and-publish
 
 on:
   push:
-    branches:
-      - main
-
-permissions:
-  contents: write      # Needed for pushing tags
-  packages: write      # Needed for publishing packages
+    branches: [main] # Trigger when changes are pushed to main
+    paths:
+      - 'packages/**'
+      - '.github/workflows/publish.yml'
 
 jobs:
-  build-and-publish:
+  publish:
     runs-on: ubuntu-latest
 
-    env:
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
     steps:
+      # Checkout the repo
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      # Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          registry-url: https://npm.pkg.github.com/
+          node-version: '20'
 
+      # Create a .npmrc file in the current directory using the secret token
       - name: Write .npmrc
-        run: echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+        run: echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" > .npmrc
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      # Install dependencies using workspace-aware install
       - name: Install dependencies
-        run: npm install
+        run: npm ci --workspaces
 
+      # Build packages (assumes each package has build script)
       - name: Build packages
         run: npm run build --workspaces
 
+      # (Optional) Debug if npm is authenticated
       - name: Debug auth
-        run: npm whoami
+        run: npm whoami || echo "Not authenticated"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_USERCONFIG: ${{ github.workspace }}/.npmrc
 
+      # Publish changed workspaces
       - name: Publish changed workspaces
         run: |
           set -e
@@ -54,7 +60,7 @@ jobs:
 
             if [ -z "$TAG_EXISTS" ]; then
               echo "::group::Publishing $PKG_NAME@$VERSION"
-              npm publish --workspace "$PKG_NAME" --access=restricted --registry=https://npm.pkg.github.com
+              npm publish --workspace "$PKG_NAME" --access=public --registry=https://npm.pkg.github.com
               echo "::endgroup::"
               CHANGED=1
             else
@@ -63,13 +69,17 @@ jobs:
           done
 
           echo "changed=$CHANGED" >> $GITHUB_OUTPUT
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_USERCONFIG: ${{ github.workspace }}/.npmrc
 
+      # Create a git tag if anything was published
       - name: Create Git Tag
-        if: success()
+        if: steps.publish.outputs.changed == '1'
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
           git tag "packages-$(date +'%Y%m%d%H%M%S')"
-          git push origin --tags
+          git push --tags
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
