@@ -1,55 +1,67 @@
-
 name: build-and-publish
 
+# Trigger workflow only when changes happen to the main branch or the workflow file itself
 on:
   push:
     branches: [main]
     paths:
-      - 'packages/**'
-      - '.github/workflows/publish.yml'
+      - 'packages/**'                # Watch changes in any workspace package
+      - '.github/workflows/publish.yml'  # Watch changes to this workflow file
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # Use the latest available Ubuntu environment
 
     steps:
+      # Step 1: Checkout the repository contents
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      # Step 2: Setup Node.js (required to run npm, build, etc.)
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      # Step 3: Create a .npmrc file with GitHub token for npm authentication
       - name: Write .npmrc
         run: echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" > .npmrc
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}  # This token must have package:write scope
 
+      # Step 4: Install all dependencies across workspaces using npm ci (clean install)
       - name: Install dependencies
         run: npm ci --workspaces
 
+      # Step 5: Build all workspace packages (assumes each has a build script)
       - name: Build packages
         run: npm run build --workspaces
 
+      # Step 6: Debug auth (optional) - check which user is authenticated with npm
       - name: Debug auth
         run: npm whoami || echo "Not authenticated"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_USERCONFIG: ${{ github.workspace }}/.npmrc
 
+      # Step 7: Publish only changed workspaces to GitHub Package Registry
       - name: Publish changed workspaces
         id: publish
         run: |
-          set -e
-          CHANGED=0
+          set -e  # Exit on first error
+          CHANGED=0  # Track if anything was published
+
+          # Find all valid package workspaces
           WORKSPACES=$(find packages -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/package.json' \; -print | sed 's|packages/||')
+
           for WS in $WORKSPACES; do
             PKG_PATH="packages/$WS"
             PKG_NAME=$(jq -r .name "$PKG_PATH/package.json")
             VERSION=$(jq -r .version "$PKG_PATH/package.json")
+
             echo "Checking $PKG_NAME@$VERSION..."
             TAG_EXISTS=$(npm view "$PKG_NAME@$VERSION" version 2>/dev/null || echo "")
+
             if [ -z "$TAG_EXISTS" ]; then
               echo "::group::Publishing $PKG_NAME@$VERSION"
               npm publish --workspace "$PKG_NAME" --access=public --registry=https://npm.pkg.github.com
@@ -59,22 +71,26 @@ jobs:
               echo "Skipping $PKG_NAME@$VERSION (already published)"
             fi
           done
+
+          # Set GitHub Actions output if anything was published
           echo "changed=$CHANGED" >> $GITHUB_OUTPUT
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_USERCONFIG: ${{ github.workspace }}/.npmrc
 
-      - name: Set up Git credentials
-        if: steps.publish.outputs.changed == '1'
-        run: git remote set-url origin https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/${{ github.repository }}
-
+      # Step 8: Create a Git tag with timestamp if something was published
       - name: Create Git Tag
         if: steps.publish.outputs.changed == '1'
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
+
+          # Generate a unique tag name based on timestamp
           TAG_NAME="packages-$(date +'%Y%m%d%H%M%S')"
           git tag "$TAG_NAME"
+
+          # Push tag using personal access token (with repo scope)
+          git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}
           git push origin "$TAG_NAME"
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}  # Must be a PAT with repo write access
