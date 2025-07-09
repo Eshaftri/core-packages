@@ -1,12 +1,21 @@
-name: build-and-publish
+name: Publish
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+
+permissions:
+  contents: write      # Needed for pushing tags
+  packages: write      # Needed for publishing packages
 
 jobs:
-  publish:
+  build-and-publish:
     runs-on: ubuntu-latest
+
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -16,13 +25,9 @@ jobs:
         with:
           node-version: 20
           registry-url: https://npm.pkg.github.com/
-          scope: '@eshaftri'
 
       - name: Write .npmrc
-        run: |
-          echo "//npm.pkg.github.com/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
 
       - name: Install dependencies
         run: npm install
@@ -31,10 +36,7 @@ jobs:
         run: npm run build --workspaces
 
       - name: Debug auth
-        run: |
-          echo "NPM_TOKEN is set: ${NPM_TOKEN:0:4}****"
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm whoami
 
       - name: Publish changed workspaces
         run: |
@@ -61,15 +63,9 @@ jobs:
           done
 
           echo "changed=$CHANGED" >> $GITHUB_OUTPUT
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_USERCONFIG: ~/.npmrc
 
-      - name: Set up Git credentials for pushing
-        run: |
-          git remote set-url origin https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/Eshaftri/core-packages.git
-
-      - name: Tag commit
+      - name: Create Git Tag
+        if: success()
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
