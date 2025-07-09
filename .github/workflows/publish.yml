@@ -15,6 +15,10 @@ jobs:
       contents: read
       packages: write
 
+    env:
+      NPM_CONFIG_USERCONFIG: ${{ github.workspace }}/.npmrc
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -25,14 +29,16 @@ jobs:
           registry-url: "https://npm.pkg.github.com"
           scope: "@eshaftri"
 
-      - name: Configure npm auth
-        run: echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" >> $HOME/.npmrc
+      # Write a project‑scoped .npmrc that contains the PAT
+      - name: Write .npmrc
+        run: echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" > $NPM_CONFIG_USERCONFIG
 
       - run: npm install
       - run: npm run build --workspaces
 
-      - name: Debug authentication
-        run: npm whoami --registry=https://npm.pkg.github.com || echo "❌ Not authenticated"
+      # Confirm the token really works
+      - name: Debug auth
+        run: npm whoami --registry=https://npm.pkg.github.com
 
       - name: Publish changed workspaces
         id: publish
