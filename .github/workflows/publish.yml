@@ -2,48 +2,48 @@ name: build-and-publish
 
 on:
   push:
-    branches: [main] # Trigger the workflow when changes are pushed to the 'main' branch
+    branches: [main]
     paths:
-      - 'packages/**' # Only trigger if something changes inside packages/
-      - '.github/workflows/publish.yml' # Or if this workflow file itself changes
+      - 'packages/**'
+      - '.github/workflows/publish.yml'
 
 jobs:
   publish:
-    runs-on: ubuntu-latest # Use the latest Ubuntu runner
+    runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout the repository using GitHub's token
+      # Step 1: Checkout repository
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Step 2: Setup Node.js version 20
+      # Step 2: Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # Step 3: Write .npmrc with GitHub Packages auth
+      # Step 3: Authenticate to GitHub Packages
       - name: Write .npmrc
         run: echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" > .npmrc
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # Step 4: Install dependencies for all workspaces using npm
+      # Step 4: Install dependencies for all workspaces
       - name: Install dependencies
         run: npm ci --workspaces
 
-      # Step 5: Build each workspace (assumes each has a build script)
+      # Step 5: Build all workspaces
       - name: Build packages
         run: npm run build --workspaces
 
-      # Step 6: Debug authentication (optional, but useful for troubleshooting)
+      # Step 6: Debug whoami (optional)
       - name: Debug auth
         run: npm whoami || echo "Not authenticated"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_USERCONFIG: ${{ github.workspace }}/.npmrc
 
-      # Step 7: Publish any changed workspaces
+      # Step 7: Publish changed workspaces
       - name: Publish changed workspaces
         id: publish
         run: |
@@ -74,15 +74,27 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_USERCONFIG: ${{ github.workspace }}/.npmrc
 
-      # Step 8: Create Git Tag (only if packages were published)
+      # Step 8: Create Git Tag if something was published
       - name: Create Git Tag
         if: steps.publish.outputs.changed == '1'
+        id: tag
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
-          TAG_NAME="packages-$(date +'%Y%m%d%H%M%S')" # e.g., packages-20250710123000
+          TAG_NAME="packages-$(date +'%Y%m%d%H%M%S')"
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
           git tag "$TAG_NAME"
           git push origin "$TAG_NAME"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Use GitHub's default token
 
+      # Step 9: Create GitHub Release from the tag
+      - name: Create GitHub Release
+        if: steps.publish.outputs.changed == '1'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: "Monorepo Package Release ${{ env.TAG_NAME }}"
+          body: |
+            ✅ Published new workspace package(s)
+            - View on GitHub Packages: https://github.com/${{ github.repository }}/packages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
