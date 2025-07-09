@@ -1,6 +1,6 @@
 {
   "name": "@eshaftri/secret-provider-ibm",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Secret provider for IBM Cloud Secrets Manager",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
